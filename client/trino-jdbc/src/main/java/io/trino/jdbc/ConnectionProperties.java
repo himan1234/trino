@@ -88,6 +88,13 @@ final class ConnectionProperties
     public static final ConnectionProperty<String> TRACE_TOKEN = new TraceToken();
     public static final ConnectionProperty<Map<String, String>> SESSION_PROPERTIES = new SessionProperties();
     public static final ConnectionProperty<String> SOURCE = new Source();
+    public static final ConnectionProperty<String> OCI_PROFILE = new OciProfile();
+    public static final ConnectionProperty<String> OCI_CONFIG_FILE = new OciConfigFile();
+    public static final ConnectionProperty<String> OCI_TENANCY_ID = new OciTenancyId();
+    public static final ConnectionProperty<String> OCI_USER_ID = new OciUserId();
+    public static final ConnectionProperty<String> OCI_FINGERPRINT = new OciFingerprint();
+    public static final ConnectionProperty<String> OCI_PRIVATE_KEY_FILE = new OciPrivateKeyFile();
+    public static final ConnectionProperty<String> OCI_PRIVATE_KEY_PASSPHRASE = new OciPrivateKeyPassphrase();
 
     private static final Set<ConnectionProperty<?>> ALL_PROPERTIES = ImmutableSet.<ConnectionProperty<?>>builder()
             .add(USER)
@@ -124,6 +131,13 @@ final class ConnectionProperties
             .add(TRACE_TOKEN)
             .add(SESSION_PROPERTIES)
             .add(SOURCE)
+            .add(OCI_PROFILE)
+            .add(OCI_CONFIG_FILE)
+            .add(OCI_TENANCY_ID)
+            .add(OCI_USER_ID)
+            .add(OCI_FINGERPRINT)
+            .add(OCI_PRIVATE_KEY_FILE)
+            .add(OCI_PRIVATE_KEY_PASSPHRASE)
             .add(EXTERNAL_AUTHENTICATION)
             .add(EXTERNAL_AUTHENTICATION_TIMEOUT)
             .add(EXTERNAL_AUTHENTICATION_TOKEN_CACHE)
@@ -166,6 +180,69 @@ final class ConnectionProperties
         public User()
         {
             super("user", NOT_REQUIRED, ALLOWED, NON_EMPTY_STRING_CONVERTER);
+        }
+    }
+
+    private static class OciProfile
+            extends AbstractConnectionProperty<String>
+    {
+        public OciProfile()
+        {
+            super("ociProfile", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciConfigFile
+            extends AbstractConnectionProperty<String>
+    {
+        public OciConfigFile()
+        {
+            super("ociConfigFile", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciTenancyId
+            extends AbstractConnectionProperty<String>
+    {
+        public OciTenancyId()
+        {
+            super("ociTenancyId", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciUserId
+            extends AbstractConnectionProperty<String>
+    {
+        public OciUserId()
+        {
+            super("ociUserId", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciFingerprint
+            extends AbstractConnectionProperty<String>
+    {
+        public OciFingerprint()
+        {
+            super("ociFingerprint", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciPrivateKeyFile
+            extends AbstractConnectionProperty<String>
+    {
+        public OciPrivateKeyFile()
+        {
+            super("ociPrivateKeyFile", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
+        }
+    }
+
+    private static class OciPrivateKeyPassphrase
+            extends AbstractConnectionProperty<String>
+    {
+        public OciPrivateKeyPassphrase()
+        {
+            super("ociPrivateKeyPassphrase", NOT_REQUIRED, ALLOWED, STRING_CONVERTER);
         }
     }
 

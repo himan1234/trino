@@ -26,6 +26,10 @@ import okhttp3.OkHttpClient;
 
 import javax.annotation.Nullable;
 
+import com.oracle.bmc.auth.AuthenticationDetailsProvider;
+import com.oracle.bmc.auth.ConfigFileAuthenticationDetailsProvider;
+import com.oracle.bmc.http.signing.DefaultRequestSigner;
+import com.oracle.bmc.http.signing.RequestSigner;
 import java.net.URI;
 import java.nio.charset.CharsetEncoder;
 import java.sql.Array;
@@ -76,6 +80,18 @@ import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
+import okhttp3.Interceptor; // Added
+import okhttp3.Request; // Added
+import okhttp3.RequestBody; // Added
+import okhttp3.Response; // Added
+import okio.Buffer; // Added
+import java.io.ByteArrayInputStream; // Added
+import java.io.IOException; // Added
+import java.io.InputStream; // Added
+import java.util.ArrayList; // Added
+import java.util.List; // Added
+import java.util.TreeMap; // Added
+
 public class TrinoConnection
         implements Connection
 {
@@ -109,6 +125,17 @@ public class TrinoConnection
     private final OkHttpClient httpClient;
     private final Set<TrinoStatement> statements = newSetFromMap(new ConcurrentHashMap<>());
 
+    private final Optional<String> ociProfile;
+    private final Optional<String> ociConfigFile;
+    private final Optional<String> ociTenancyId;
+    private final Optional<String> ociUserId;
+    private final Optional<String> ociFingerprint;
+    private final Optional<String> ociPrivateKeyFile;
+    private final Optional<String> ociPrivateKeyPassphrase;
+    private final Optional<AuthenticationDetailsProvider> authenticationDetailsProvider;
+    private final Optional<RequestSigner> requestSigner;
+    private OkHttpClient finalHttpClient; // Renamed to avoid conflict, will be initialized later
+
     TrinoConnection(TrinoDriverUri uri, OkHttpClient httpClient)
             throws SQLException
     {
@@ -125,10 +152,38 @@ public class TrinoConnection
         this.compressionDisabled = uri.isCompressionDisabled();
         this.assumeLiteralNamesInMetadataCallsForNonConformingClients = uri.isAssumeLiteralNamesInMetadataCallsForNonConformingClients();
         this.assumeLiteralUnderscoreInMetadataCallsForNonConformingClients = uri.isAssumeLiteralUnderscoreInMetadataCallsForNonConformingClients();
-        this.httpClient = requireNonNull(httpClient, "httpClient is null");
+        // httpClient will be assigned below after potentially adding interceptor
         uri.getClientInfo().ifPresent(tags -> clientInfo.put(CLIENT_INFO, tags));
         uri.getClientTags().ifPresent(tags -> clientInfo.put(CLIENT_TAGS, tags));
         uri.getTraceToken().ifPresent(tags -> clientInfo.put(TRACE_TOKEN, tags));
+
+        this.ociProfile = uri.getOciProfile();
+        this.ociConfigFile = uri.getOciConfigFile();
+        this.ociTenancyId = uri.getOciTenancyId();
+        this.ociUserId = uri.getOciUserId();
+        this.ociFingerprint = uri.getOciFingerprint();
+        this.ociPrivateKeyFile = uri.getOciPrivateKeyFile();
+        this.ociPrivateKeyPassphrase = uri.getOciPrivateKeyPassphrase();
+
+        if (ociProfile.isPresent()) {
+            try {
+                AuthenticationDetailsProvider provider = new ConfigFileAuthenticationDetailsProvider(ociConfigFile.orElse(null), ociProfile.get());
+                this.authenticationDetailsProvider = Optional.of(provider);
+                RequestSigner signer = new DefaultRequestSigner(provider);
+                this.requestSigner = Optional.of(signer);
+                this.finalHttpClient = requireNonNull(httpClient, "httpClient is null").newBuilder()
+                        .addInterceptor(new OciAuthInterceptor(signer, provider))
+                        .build();
+            }
+            catch (Exception e) {
+                throw new SQLException("Failed to initialize OCI authentication", e);
+            }
+        }
+        else {
+            this.authenticationDetailsProvider = Optional.empty();
+            this.requestSigner = Optional.empty();
+            this.finalHttpClient = requireNonNull(httpClient, "httpClient is null");
+        }
 
         roles.putAll(uri.getRoles());
         timeZoneId.set(ZoneId.systemDefault());
@@ -744,7 +799,64 @@ public class TrinoConnection
                 timeout,
                 compressionDisabled);
 
-        return newStatementClient(httpClient, session, sql);
+    return newStatementClient(finalHttpClient, session, sql); // Use finalHttpClient
+    }
+
+    private static class OciAuthInterceptor
+            implements Interceptor
+    {
+        private final RequestSigner requestSigner;
+        private final AuthenticationDetailsProvider provider;
+
+        public OciAuthInterceptor(RequestSigner requestSigner, AuthenticationDetailsProvider provider)
+        {
+            this.requestSigner = requestSigner;
+            this.provider = provider; // provider might be needed for specific headers
+        }
+
+        @Override
+        public Response intercept(Chain chain)
+                throws IOException
+        {
+            Request originalRequest = chain.request();
+            Request.Builder signedRequestBuilder = originalRequest.newBuilder();
+
+            // Prepare inputs for OCI SDK RequestSigner
+            Map<String, List<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (String name : originalRequest.headers().names()) {
+                headers.put(name, originalRequest.headers(name));
+            }
+            // OCI signer expects "host" header
+            if (!headers.containsKey("host")) {
+                List<String> hostValues = new ArrayList<>();
+                hostValues.add(originalRequest.url().host());
+                headers.put("host", hostValues);
+            }
+
+
+            InputStream bodyInputStream = null;
+            RequestBody body = originalRequest.body();
+            if (body != null) {
+                Buffer buffer = new Buffer();
+                body.writeTo(buffer);
+                bodyInputStream = new ByteArrayInputStream(buffer.readByteArray());
+                // OCI Signer expects "x-content-sha256" for POST/PUT, etc.
+                // This should be handled by the OCI SDK if content is passed,
+                // but it's good to be aware of.
+            }
+
+            Map<String, String> ociHeaders = requestSigner.signRequest(
+                    originalRequest.url().uri(),
+                    originalRequest.method(),
+                    headers,
+                    bodyInputStream);
+
+            for (Map.Entry<String, String> entry : ociHeaders.entrySet()) {
+                signedRequestBuilder.header(entry.getKey(), entry.getValue());
+            }
+
+            return chain.proceed(signedRequestBuilder.build());
+        }
     }
 
     void updateSession(StatementClient client)
